@@ -28,9 +28,17 @@ The job:
 
 Release assets on this public repo can be downloaded without authentication:
 
+The green run is `slim-template-4.3-3`:
+
+```text
+https://github.com/tyecoldiron-hash/NebraskaMilitiaGame/releases/download/slim-template-4.3-3/macos.zip
+https://github.com/tyecoldiron-hash/NebraskaMilitiaGame/releases/download/slim-template-4.3-3/godot.macos.template_release.arm64
+```
+
+Later runs use the same path with their own run number:
+
 ```text
 https://github.com/tyecoldiron-hash/NebraskaMilitiaGame/releases/download/slim-template-4.3-<run>/macos.zip
-https://github.com/tyecoldiron-hash/NebraskaMilitiaGame/releases/download/slim-template-4.3-<run>/godot.macos.template_release.arm64
 ```
 
 Point the macOS export preset at the zip:
@@ -45,7 +53,13 @@ The debug slot can keep using the stock 4.3 template.
 
 Stock Godot 4.3 arm64 release template binary: **73,112,736 bytes**.
 
-The measured size of this build is recorded in the workflow summary and on the GitHub Release for each run. This file is updated after a green run.
+This build (`slim-template-4.3-3`, `lto=full`, stripped): **32,724,800 bytes** (about 55% smaller). `macos.zip` is **10,934,131 bytes**.
+
+| file | bytes |
+| --- | ---: |
+| stock 4.3 arm64 release binary | 73,112,736 |
+| `godot.macos.template_release.arm64` | 32,724,800 |
+| `macos.zip` | 10,934,131 |
 
 ## Profile
 
