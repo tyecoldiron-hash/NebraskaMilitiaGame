@@ -21,9 +21,12 @@ concurrency:
 
 jobs:
   build:
-    # macos-14 (arm64 and Intel) left GitHub Actions on 2026-11-02.
-    # macos-15 is the hosted Apple Silicon image that replaced it.
-    runs-on: macos-15
+    # macos-14 left GitHub Actions on 2026-11-02.
+    # macos-15 (arm64) was queued and then cancelled:
+    # "The job was not acquired by Runner of type hosted even after multiple attempts"
+    # (macOS arm64 capacity). macos-15-intel is a separate pool. Xcode on that
+    # image cross-compiles the arm64 template with `arch=arm64`.
+    runs-on: macos-15-intel
     timeout-minutes: 360
     env:
       SCONS_CACHE: ${{ github.workspace }}/.scons-cache
@@ -80,14 +83,16 @@ jobs:
           echo "clang=$(command -v clang)"
           clang --version
           echo "scons=$(command -v scons)"
+          echo "host=$(uname -m) target=arm64"
           scons --version
           # production=yes reads lto from the command line, not custom.py.
+          # 4-core Intel runner, 14 GB RAM. Leave one core for the OS during LTO.
           scons profile="${GITHUB_WORKSPACE}/custom.py" \
             platform=macos \
             arch=arm64 \
             target=template_release \
             lto=full \
-            -j2
+            -j3
 
       - name: Strip and package macos.zip
         working-directory: godot

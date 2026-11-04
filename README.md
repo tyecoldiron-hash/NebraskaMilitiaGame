@@ -4,7 +4,7 @@ This repository builds a size-optimized **Godot 4.3-stable** macOS Apple Silicon
 
 ## Workflow
 
-[`.github/workflows/slim-macos-template.yml`](.github/workflows/slim-macos-template.yml) runs on a GitHub-hosted **`macos-15`** Apple Silicon runner. GitHub Actions retired the macOS 14 runner images on November 2, 2026, so `macos-14` can no longer compile this template.
+[`.github/workflows/slim-macos-template.yml`](.github/workflows/slim-macos-template.yml) runs on a GitHub-hosted **`macos-15-intel`** runner and cross-compiles the arm64 template (`arch=arm64`). GitHub Actions retired the macOS 14 images on November 2, 2026. A `macos-15` Apple Silicon job was then cancelled before any step ran: the hosted arm64 pool never assigned a runner. The Intel macOS 15 image is a separate pool, and Xcode on it can emit an arm64 binary.
 
 It runs on `workflow_dispatch`, on pushes to `main`, and on pull requests. README-only pushes are ignored so a size note does not rebuild the engine.
 
@@ -15,7 +15,7 @@ The job:
 3. Builds with Xcode's `clang`:
 
    ```sh
-   scons profile="$GITHUB_WORKSPACE/custom.py" platform=macos arch=arm64 target=template_release lto=full -j2
+   scons profile="$GITHUB_WORKSPACE/custom.py" platform=macos arch=arm64 target=template_release lto=full -j3
    ```
 
 4. Runs `strip -x` on `bin/godot.macos.template_release.arm64`.
