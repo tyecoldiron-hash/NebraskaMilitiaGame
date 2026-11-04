@@ -51,7 +51,10 @@ jobs:
           xcode-select -p
           xcodebuild -version
           uname -m
-          "$DEVELOPER_DIR/usr/bin/clang" --version
+          # Xcode 16 does not ship clang at Developer/usr/bin/clang.
+          xcrun --find clang
+          xcrun --find clang++
+          xcrun clang --version
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -75,10 +78,11 @@ jobs:
         run: |
           set -euo pipefail
           # Godot's macOS detect.py sets CC=clang from PATH. Keep Xcode's
-          # clang ahead of any Android NDK LLVM on the runner image.
+          # clang (via xcrun) ahead of any Android NDK LLVM on the runner image.
           PYBIN="$(dirname "$(command -v python)")"
+          CLANG_BIN="$(dirname "$(xcrun --find clang)")"
           FILTERED="$(printf '%s' "$PATH" | tr ':' '\n' | grep -v -i -E 'android|ndk' | paste -sd: -)"
-          export PATH="${PYBIN}:${DEVELOPER_DIR}/usr/bin:${FILTERED}"
+          export PATH="${PYBIN}:${CLANG_BIN}:${DEVELOPER_DIR}/usr/bin:${FILTERED}"
           hash -r
           echo "clang=$(command -v clang)"
           clang --version
