@@ -1,0 +1,202 @@
+name: Slim macOS export template
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "README.md"
+  pull_request:
+    paths-ignore:
+      - "README.md"
+
+# Release assets on a public repo are downloadable without auth.
+# Actions artifacts are not.
+permissions:
+  contents: write
+
+concurrency:
+  group: slim-macos-template-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # macos-14 left GitHub Actions on 2026-11-02.
+    # macos-15 (arm64) was queued and then cancelled:
+    # "The job was not acquired by Runner of type hosted even after multiple attempts"
+    # (macOS arm64 capacity). macos-15-intel is a separate pool. Xcode on that
+    # image cross-compiles the arm64 template with `arch=arm64`.
+    runs-on: macos-15-intel
+    timeout-minutes: 360
+    env:
+      SCONS_CACHE: ${{ github.workspace }}/.scons-cache
+      SCONS_CACHE_LIMIT: "2048"
+      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+    steps:
+      - name: Checkout recipe
+        uses: actions/checkout@v7
+
+      - name: Checkout Godot 4.3-stable
+        uses: actions/checkout@v7
+        with:
+          repository: godotengine/godot
+          ref: 4.3-stable
+          path: godot
+          fetch-depth: 1
+
+      - name: Select Xcode toolchain
+        run: |
+          set -euo pipefail
+          sudo xcode-select -s "$DEVELOPER_DIR"
+          xcode-select -p
+          xcodebuild -version
+          uname -m
+          # Xcode 16 does not ship clang at Developer/usr/bin/clang.
+          xcrun --find clang
+          xcrun --find clang++
+          xcrun clang --version
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install SCons
+        run: python -m pip install --upgrade pip "scons==4.8.1"
+
+      - name: Cache SCons
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.SCONS_CACHE }}
+          key: scons-${{ runner.os }}-${{ hashFiles('custom.py') }}-${{ github.sha }}
+          restore-keys: |
+            scons-${{ runner.os }}-${{ hashFiles('custom.py') }}-
+            scons-${{ runner.os }}-
+
+      - name: Build release template
+        working-directory: godot
+        run: |
+          set -euo pipefail
+          # Godot's macOS detect.py sets CC=clang from PATH. Keep Xcode's
+          # clang (via xcrun) ahead of any Android NDK LLVM on the runner image.
+          PYBIN="$(dirname "$(command -v python)")"
+          CLANG_BIN="$(dirname "$(xcrun --find clang)")"
+          FILTERED="$(printf '%s' "$PATH" | tr ':' '\n' | grep -v -i -E 'android|ndk' | paste -sd: -)"
+          export PATH="${PYBIN}:${CLANG_BIN}:${DEVELOPER_DIR}/usr/bin:${FILTERED}"
+          hash -r
+          echo "clang=$(command -v clang)"
+          clang --version
+          echo "scons=$(command -v scons)"
+          echo "host=$(uname -m) target=arm64"
+          scons --version
+          # production=yes reads lto from the command line, not custom.py.
+          # 4-core Intel runner, 14 GB RAM. Leave one core for the OS during LTO.
+          scons profile="${GITHUB_WORKSPACE}/custom.py" \
+            platform=macos \
+            arch=arm64 \
+            target=template_release \
+            lto=full \
+            -j3
+
+      - name: Strip and package macos.zip
+        working-directory: godot
+        run: |
+          set -euo pipefail
+          BIN="bin/godot.macos.template_release.arm64"
+          if [[ ! -f "$BIN" ]]; then
+            echo "expected ${BIN} missing; bin/ contains:"
+            ls -la bin || true
+            exit 1
+          fi
+          file "$BIN"
+          file "$BIN" | grep -q "arm64"
+          stat -f "size_before_strip=%z" "$BIN"
+          strip -x "$BIN"
+          file "$BIN" | grep -q "arm64"
+          stat -f "size_after_strip=%z" "$BIN"
+          chmod +x "$BIN"
+
+          DIST="${GITHUB_WORKSPACE}/dist"
+          STAGE="${GITHUB_WORKSPACE}/pkg"
+          rm -rf "$DIST" "$STAGE"
+          mkdir -p "$DIST" "$STAGE/macos_template.app/Contents/MacOS"
+          cp -R misc/dist/macos_template.app/. "$STAGE/macos_template.app/"
+          cp "$BIN" "$STAGE/macos_template.app/Contents/MacOS/godot_macos_release.universal"
+          chmod +x "$STAGE/macos_template.app/Contents/MacOS/godot_macos_release.universal"
+          cp "$BIN" "$DIST/godot.macos.template_release.arm64"
+          test -f "$STAGE/macos_template.app/Contents/Info.plist"
+          test -f "$STAGE/macos_template.app/Contents/PkgInfo"
+          (
+            cd "$STAGE"
+            zip -q -9 -r "$DIST/macos.zip" macos_template.app
+          )
+          unzip -l "$DIST/macos.zip"
+          unzip -l "$DIST/macos.zip" | grep -q "macos_template.app/Contents/MacOS/godot_macos_release.universal"
+          unzip -l "$DIST/macos.zip" | grep -q "macos_template.app/Contents/Info.plist"
+          stat -f "binary_bytes=%z" "$DIST/godot.macos.template_release.arm64"
+          stat -f "zip_bytes=%z" "$DIST/macos.zip"
+          {
+            echo "## Slim template"
+            echo ""
+            echo "| file | bytes |"
+            echo "| --- | ---: |"
+            echo "| godot.macos.template_release.arm64 | $(stat -f%z "$DIST/godot.macos.template_release.arm64") |"
+            echo "| macos.zip | $(stat -f%z "$DIST/macos.zip") |"
+            echo "| stock 4.3 arm64 release binary | 73112736 |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: slim-macos-template-${{ github.run_number }}
+          path: |
+            dist/godot.macos.template_release.arm64
+            dist/macos.zip
+          if-no-files-found: error
+          compression-level: 9
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: slim-template-4.3-${{ github.run_number }}
+          RELEASE_TARGET: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          BYTES="$(stat -f%z dist/godot.macos.template_release.arm64)"
+          ZIP_BYTES="$(stat -f%z dist/macos.zip)"
+          NOTES="$(printf '%s\n' \
+            "Size-optimized Godot 4.3-stable macOS arm64 release export template." \
+            "" \
+            "- godot.macos.template_release.arm64: ${BYTES} bytes" \
+            "- macos.zip: ${ZIP_BYTES} bytes" \
+            "- Stock 4.3 arm64 release binary: 73112736 bytes" \
+            "" \
+            "macos.zip is the custom macOS release template. The arm64 binary is stored as macos_template.app/Contents/MacOS/godot_macos_release.universal." \
+            "" \
+            "Workflow run: ${RUN_URL}" \
+          )"
+          LATEST=(--latest=false)
+          if [[ "$EVENT_NAME" != "pull_request" ]]; then
+            LATEST=(--latest)
+          fi
+          if gh release view "$RELEASE_TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" \
+              dist/godot.macos.template_release.arm64 \
+              dist/macos.zip \
+              --repo "$REPO" \
+              --clobber
+          else
+            gh release create "$RELEASE_TAG" \
+              dist/godot.macos.template_release.arm64 \
+              dist/macos.zip \
+              --repo "$REPO" \
+              --target "$RELEASE_TARGET" \
+              --title "Slim macOS arm64 template 4.3 (run ${GITHUB_RUN_NUMBER})" \
+              --notes "$NOTES" \
+              "${LATEST[@]}"
+          fi
+          echo "Release download:"
+          echo "https://github.com/${REPO}/releases/download/${RELEASE_TAG}/macos.zip"
